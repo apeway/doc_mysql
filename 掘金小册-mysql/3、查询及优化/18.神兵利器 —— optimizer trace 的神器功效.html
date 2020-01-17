@@ -17,7 +17,10 @@ one_line的值是控制输出格式的，如果为on那么所有输出都将在�
 </p></blockquote><p>如果想打开这个功能，必须首先把<code>enabled</code>的值改为<code>on</code>，就像这样：</p>
 <pre><code class="hljs bash" lang="bash">mysql&gt; SET optimizer_trace=<span class="hljs-string">"enabled=on"</span>;
 Query OK, 0 rows affected (0.00 sec)
-</code></pre><p>然后我们就可以输入我们想要查看优化过程的查询语句，当该查询语句执行完成后，就可以到<code>information_schema</code>数据库下的<code>OPTIMIZER_TRACE</code>表中查看完整的优化过程。这个<code>OPTIMIZER_TRACE</code>表有4个列，分别是：</p>
+</code></pre>
+
+<br>
+<p>然后我们就可以输入我们想要查看优化过程的查询语句，当该查询语句执行完成后，就可以到<code>information_schema</code>数据库下的<code>OPTIMIZER_TRACE</code>表中查看完整的优化过程。这个<code>OPTIMIZER_TRACE</code>表有4个列，分别是：</p>
 <ul>
 <li>
 <p><code>QUERY</code>：表示我们的查询语句。</p>
@@ -32,6 +35,8 @@ Query OK, 0 rows affected (0.00 sec)
 <p><code>INSUFFICIENT_PRIVILEGES</code>：表示是否没有权限查看优化过程，默认值是0，只有某些特殊情况下才会是<code>1</code>，我们暂时不关心这个字段的值。</p>
 </li>
 </ul>
+
+<br>
 <p>完整的使用<code>optimizer trace</code>功能的步骤总结如下：</p>
 <pre><code class="hljs bash" lang="bash"><span class="hljs-comment"># 1. 打开optimizer trace功能 (默认情况下它是关闭的):</span>
 SET optimizer_trace=<span class="hljs-string">"enabled=on"</span>;
@@ -47,7 +52,10 @@ SELECT * FROM information_schema.OPTIMIZER_TRACE;
 
 <span class="hljs-comment"># 5. 当你停止查看语句的优化过程时，把optimizer trace功能关闭</span>
 SET optimizer_trace=<span class="hljs-string">"enabled=off"</span>;
-</code></pre><p>现在我们有一个搜索条件比较多的查询语句，它的执行计划如下：</p>
+</code></pre>
+
+<br>
+<p>现在我们有一个搜索条件比较多的查询语句，它的执行计划如下：</p>
 <pre><code class="hljs bash" lang="bash">mysql&gt; EXPLAIN SELECT * FROM s1 WHERE
     -&gt;     key1 &gt; <span class="hljs-string">'z'</span> AND
     -&gt;     key2 &lt; 1000000 AND
@@ -351,7 +359,7 @@ MISSING_BYTES_BEYOND_MAX_MEM_SIZE: 0
 INSUFFICIENT_PRIVILEGES: 0
 
 1 row <span class="hljs-keyword">in</span> <span class="hljs-built_in">set</span> (0.00 sec)
-</code></pre><p>大家看到这个输出的第一感觉就是这文本也太多了点儿吧，其实这只是优化器执行过程中的一小部分，设计<code>MySQL</code>的大叔可能会在之后的版本中添加更多的优化过程信息。不过杂乱之中其实还是蛮有规律的，优化过程大致分为了三个阶段：</p>
+</code></pre><p>大家看到这个输出的第一感觉就是这文本也太多了点儿吧，其实这只是优化器执行过程中的一小部分，设计<code>MySQL</code>的大叔可能会在之后的版本中添加更多的优化过程信息。不过杂乱之中其实还是蛮有规律的，<b style="color:blue">优化过程大致分为了三个阶段：</b></p>
 <ul>
 <li>
 <p><code>prepare</code>阶段</p>
@@ -363,5 +371,8 @@ INSUFFICIENT_PRIVILEGES: 0
 <p><code>execute</code>阶段</p>
 </li>
 </ul>
-<p>我们所说的基于成本的优化主要集中在<code>optimize</code>阶段，对于单表查询来说，我们主要关注<code>optimize</code>阶段的<code>"rows_estimation"</code>这个过程，这个过程深入分析了对单表查询的各种执行方案的成本；对于多表连接查询来说，我们更多需要关注<code>"considered_execution_plans"</code>这个过程，这个过程里会写明各种不同的连接方式所对应的成本。反正优化器最终会选择成本最低的那种方案来作为最终的执行计划，也就是我们使用<code>EXPLAIN</code>语句所展现出的那种方案。</p>
+<p>我们所说的基于成本的优化主要集中在<code>optimize</code>阶段，<br>
+对于单表查询来说，我们主要关注<code>optimize</code>阶段的<code>"rows_estimation"</code>这个过程，这个过程深入分析了对单表查询的各种执行方案的成本；<br>
+对于多表连接查询来说，我们更多需要关注<code>"considered_execution_plans"</code>这个过程，这个过程里会写明各种不同的连接方式所对应的成本。<br>
+反正优化器最终会选择成本最低的那种方案来作为最终的执行计划，也就是我们使用<code>EXPLAIN</code>语句所展现出的那种方案。</p>
 <p>如果有小伙伴对使用<code>EXPLAIN</code>语句展示出的对某个查询的执行计划很不理解，大家可以尝试使用<code>optimizer trace</code>功能来详细了解每一种执行方案对应的成本，相信这个功能能让大家更深入的了解<code>MySQL</code>查询优化器。</p>

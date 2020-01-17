@@ -1,20 +1,16 @@
 <head><meta charset="UTF-8"></head><h1 class="heading">undo日志（下）</h1>
 <p>标签： MySQL是怎样运行的</p>
 <hr>
-<p>上一章我们主要唠叨了为什么需要<code>undo日志</code>，以及<code>INSERT</code>、<code>DELETE</code>、<code>UPDATE</code>这些会对数据做改动的语句都会产生什么类型的<code>undo日志</code>，还有不同类型的<code>undo日志</code>的具体格式是什么。本章会继续唠叨这些<code>undo日志</code>会被具体写到什么地方，以及在写入过程中需要注意的一些问题。</p>
-<h2 class="heading">通用链表结构</h2>
+<p>上一章我们主要唠叨了为什么需要<code>undo日志</code>，以及<code>INSERT</code>、<code>DELETE</code>、<code>UPDATE</code>这些会对数据做改动的语句都会产生什么类型的<code>undo日志</code>，还有不同类型的<code>undo日志</code>的具体格式是什么。<br>
+<b style="color:blue">本章会继续说说这些<code>undo日志</code>会被具体写到什么地方，以及在写入过程中需要注意的一些问题。</b></p>
+
+<br>
+<h2 style="color:green" class="heading">1、通用链表结构</h2>
 <p>在写入<code>undo日志</code>的过程中会使用到多个链表，很多链表都有同样的节点结构，如图所示：</p>
 <p></p><figure><img alt="image_1d79gnaudfg2psk2l7mi1146r20.png-104.8kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a7fcc0ca928?w=1115&amp;h=463&amp;f=png&amp;s=107286"><figcaption></figcaption></figure><p></p>
-<p>在某个表空间内，我们可以通过一个页的页号和在页内的偏移量来唯一定位一个节点的位置，这两个信息也就相当于指向这个节点的一个指针。所以：</p>
-<ul>
-<li>
-<p><code>Pre Node Page Number</code>和<code>Pre Node Offset</code>的组合就是指向前一个节点的指针</p>
-</li>
-<li>
-<p><code>Next Node Page Number</code>和<code>Next Node Offset</code>的组合就是指向后一个节点的指针。</p>
-</li>
-</ul>
+<p>在某个表空间内，我们可以通过一个页的页号和在页内的偏移量来唯一定位一个节点的位置，这两个信息也就相当于指向这个节点的一个指针。</p>
 <p>整个<code>List Node</code>占用<code>12</code>个字节的存储空间。</p>
+<br>
 <p>为了更好的管理链表，设计<code>InnoDB</code>的大叔还提出了一个基节点的结构，里边存储了这个链表的<code>头节点</code>、<code>尾节点</code>以及链表长度信息，基节点的结构示意图如下：</p>
 <p></p><figure><img alt="image_1d79o8ra61jh6k0k6af13vpg329.png-103.9kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a7fcc9ccd4f?w=978&amp;h=515&amp;f=png&amp;s=106418"><figcaption></figcaption></figure><p></p>
 <p>其中：</p>
@@ -30,56 +26,61 @@
 </li>
 </ul>
 <p>整个<code>List Base Node</code>占用<code>16</code>个字节的存储空间。</p>
+<br>
 <p>所以使用<code>List Base Node</code>和<code>List Node</code>这两个结构组成的链表的示意图就是这样：</p>
 <p></p><figure><img alt="image_1d79nq0ge1gn7pmcaa7gma1uh62q.png-71kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a7fcc3c65f1?w=1067&amp;h=377&amp;f=png&amp;s=72751"><figcaption></figcaption></figure><p></p>
 <blockquote class="warning"><p>小贴士：
-
 上述链表结构我们在前边的文章中频频提到，尤其是在表空间那一章重点描述过，不过我不敢奢求大家都记住了，所以在这里又强调一遍，希望大家不要嫌我烦，我只是怕大家忘了学习后续内容吃力而已～
-</p></blockquote><h2 class="heading">FIL_PAGE_UNDO_LOG页面</h2>
-<p>我们前边唠叨表空间的时候说过，表空间其实是由许许多多的页面构成的，页面默认大小为<code>16KB</code>。这些页面有不同的类型，比如类型为<code>FIL_PAGE_INDEX</code>的页面用于存储聚簇索引以及二级索引，类型为<code>FIL_PAGE_TYPE_FSP_HDR</code>的页面用于存储表空间头部信息的，还有其他各种类型的页面，其中有一种称之为<code>FIL_PAGE_UNDO_LOG</code>类型的页面是专门用来存储<code>undo日志</code>的，这种类型的页面的通用结构如下图所示（以默认的<code>16KB</code>大小为例）：</p>
+</p></blockquote>
+
+<br>
+<h2 style="color:green" class="heading">2、FIL_PAGE_UNDO_LOG页面</h2>
+<p>我们前边唠叨表空间的时候说过，表空间其实是由许许多多的页面构成的，页面默认大小为<code>16KB</code>。这些页面有不同的类型，比如类型为<code>FIL_PAGE_INDEX</code>的页面用于存储聚簇索引以及二级索引，类型为<code>FIL_PAGE_TYPE_FSP_HDR</code>的页面用于存储表空间头部信息的，还有其他各种类型的页面，其中有一种<code><b style="color:blue">FIL_PAGE_UNDO_LOG类型的页面（简称“undo页”）</b></code>是专门用来存储<code>undo日志</code>的，这种类型的页面的通用结构如下图所示（以默认的<code>16KB</code>大小为例）：</p>
 <p></p><figure><img alt="image_1d79ec33apm47brq901sur3bi16.png-63.2kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a7fd0d7f9fa?w=938&amp;h=589&amp;f=png&amp;s=64680"><figcaption></figcaption></figure><p></p>
-<p>“类型为<code>FIL_PAGE_UNDO_LOG</code>的页”这种说法太绕口，以后我们就简称为<code>Undo页面</code>了哈。上图中的<code>File Header</code>和<code>File Trailer</code>是各种页面都有的通用结构，我们前边唠叨过很多遍了，这里就不赘述了（忘记了的可以到讲述数据页结构或者表空间的章节中查看）。<code>Undo Page Header</code>是<code>Undo页面</code>所特有的，我们来看一下它的结构：</p>
+<p>上图中的<code>File Header</code>和<code>File Trailer</code>是各种页面都有的通用结构，我们前边唠叨过很多遍了，这里就不赘述了。<br>
+<span style="color:red"><code>Undo Page Header</code>是<code>Undo页面</code>所特有的，我们来看一下它的结构：</span></p>
 <p></p><figure><img alt="image_1d79ohe8u1uqgh1e978nji1ip2m.png-71.8kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a7fd2ad0290?w=560&amp;h=431&amp;f=png&amp;s=73515"><figcaption></figcaption></figure><p></p>
 <p>其中各个属性的意思如下：</p>
 <ul>
 <li>
-<p><code>TRX_UNDO_PAGE_TYPE</code>：本页面准备存储什么种类的<code>undo日志</code>。</p>
+<p><code><b style="color:blue">TRX_UNDO_PAGE_TYPE</b></code>：本页面准备存储什么种类的<code>undo日志</code>。</p>
 <p>我们前边介绍了好几种类型的<code>undo日志</code>，它们可以被分为两个大类：</p>
 <ul>
 <li>
-<p><code>TRX_UNDO_INSERT</code>（使用十进制<code>1</code>表示）：类型为<code>TRX_UNDO_INSERT_REC</code>的<code>undo日志</code>属于此大类，一般由<code>INSERT</code>语句产生，或者在<code>UPDATE</code>语句中有更新主键的情况也会产生此类型的<code>undo日志</code>。</p>
+<p><code><b style="color:red">TRX_UNDO_INSERT</b></code>（使用十进制<code>1</code>表示）：类型为<code>TRX_UNDO_INSERT_REC</code>的<code>undo日志</code>属于此大类，一般由<code>INSERT</code>语句产生，或者在<code>UPDATE</code>语句中有更新主键的情况也会产生此类型的<code>undo日志</code>。</p>
 </li>
 <li>
-<p><code>TRX_UNDO_UPDATE</code>（使用十进制<code>2</code>表示），除了类型为<code>TRX_UNDO_INSERT_REC</code>的<code>undo日志</code>，其他类型的<code>undo日志</code>都属于这个大类，比如我们前边说的<code>TRX_UNDO_DEL_MARK_REC</code>、<code>TRX_UNDO_UPD_EXIST_REC</code>啥的，一般由<code>DELETE</code>、<code>UPDATE</code>语句产生的<code>undo日志</code>属于这个大类。</p>
+<p><code><b style="color:red">TRX_UNDO_UPDATE</b></code>（使用十进制<code>2</code>表示），除了类型为<code>TRX_UNDO_INSERT_REC</code>的<code>undo日志</code>，其他类型的<code>undo日志</code>都属于这个大类，比如我们前边说的<code>TRX_UNDO_DEL_MARK_REC</code>、<code>TRX_UNDO_UPD_EXIST_REC</code>啥的，一般由<code>DELETE</code>、<code>UPDATE</code>语句产生的<code>undo日志</code>属于这个大类。</p>
 </li>
 </ul>
-<p>这个<code>TRX_UNDO_PAGE_TYPE</code>属性可选的值就是上边的两个，用来标记本页面用于存储哪个大类的<code>undo日志</code>，不同大类的<code>undo日志</code>不能混着存储，比如一个<code>Undo页面</code>的<code>TRX_UNDO_PAGE_TYPE</code>属性值为<code>TRX_UNDO_INSERT</code>，那么这个页面就只能存储类型为<code>TRX_UNDO_INSERT_REC</code>的<code>undo日志</code>，其他类型的<code>undo日志</code>就不能放到这个页面中了。</p>
+<p>这个<code>TRX_UNDO_PAGE_TYPE</code>属性可选的值就是上边的两个，用来标记本页面用于存储哪个大类的<code>undo日志</code>，<span style="color:red">不同大类的<code>undo日志</code>不能混着存储</span>，比如一个<code>Undo页面</code>的<code>TRX_UNDO_PAGE_TYPE</code>属性值为<code>TRX_UNDO_INSERT</code>，那么这个页面就只能存储类型为<code>TRX_UNDO_INSERT_REC</code>的<code>undo日志</code>，其他类型的<code>undo日志</code>就不能放到这个页面中了。</p>
 <blockquote class="warning"><p>小贴士：
-
-之所以把undo日志分成两个大类，是因为类型为TRX_UNDO_INSERT_REC的undo日志在事务提交后可以直接删除掉，而其他类型的undo日志还需要为所谓的MVCC服务，不能直接删除掉，对它们的处理需要区别对待。当然，如果你看这段话迷迷糊糊的话，那就不需要再看一遍了，现在只需要知道undo日志分为2个大类就好了，更详细的东西我们后边会仔细唠叨的。
+<u>之所以把undo日志分成两个大类，是因为类型为TRX_UNDO_INSERT_REC的undo日志在事务提交后可以直接删除掉，而其他类型的undo日志还需要为所谓的MVCC服务，不能直接删除掉，对它们的处理需要区别对待。</u>当然，如果你看这段话迷迷糊糊的话，那就不需要再看一遍了，现在只需要知道undo日志分为2个大类就好了，更详细的东西我们后边会仔细唠叨的。
 </p></blockquote></li>
 <li>
-<p><code>TRX_UNDO_PAGE_START</code>：表示在当前页面中是从什么位置开始存储<code>undo日志</code>的，或者说表示第一条<code>undo日志</code>在本页面中的起始偏移量。</p>
+<p><code><b style="color:blue">TRX_UNDO_PAGE_START</b></code>：表示在当前页面中是从什么位置开始存储<code>undo日志</code>的，或者说表示第一条<code>undo日志</code>在本页面中的起始偏移量。</p>
 </li>
 <li>
-<p><code>TRX_UNDO_PAGE_FREE</code>：与上边的<code>TRX_UNDO_PAGE_START</code>对应，表示当前页面中存储的最后一条<code>undo</code>日志结束时的偏移量，或者说从这个位置开始，可以继续写入新的<code>undo日志</code>。</p>
+<p><code><b style="color:blue">TRX_UNDO_PAGE_FREE</b></code>：与上边的<code>TRX_UNDO_PAGE_START</code>对应，表示当前页面中存储的最后一条<code>undo</code>日志结束时的偏移量，或者说从这个位置开始，可以继续写入新的<code>undo日志</code>。</p>
 <p>假设现在向页面中写入了3条<code>undo日志</code>，那么<code>TRX_UNDO_PAGE_START</code>和<code>TRX_UNDO_PAGE_FREE</code>的示意图就是这样：</p>
 <p></p><figure><img alt="image_1d79s1ib21rku5fkq3to1e14313.png-54kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a7fd2fbc0f4?w=810&amp;h=260&amp;f=png&amp;s=55289"><figcaption></figcaption></figure><p></p>
 <p>当然，在最初一条<code>undo日志</code>也没写入的情况下，<code>TRX_UNDO_PAGE_START</code>和<code>TRX_UNDO_PAGE_FREE</code>的值是相同的。</p>
 </li>
 <li>
-<p><code>TRX_UNDO_PAGE_NODE</code>：代表一个<code>List Node</code>结构（链表的普通节点，我们上边刚说的）。</p>
+<p><code><b style="color:blue">TRX_UNDO_PAGE_NODE</b></code>：代表一个<code>List Node</code>结构（链表的普通节点，我们上边刚说的）。</p>
 <p>下边马上用到这个属性，稍安勿躁。</p>
 </li>
 </ul>
-<h2 class="heading">Undo页面链表</h2>
-<h3 class="heading">单个事务中的Undo页面链表</h3>
+
+<br>
+<h2 style="color:green" class="heading">3、Undo页面链表</h2>
+<h3 style="color:blue" class="heading">单个事务中的Undo页面链表</h3>
 <p>因为一个事务可能包含多个语句，而且一个语句可能对若干条记录进行改动，而对每条记录进行改动前，都需要记录1条或2条的<code>undo日志</code>，所以在一个事务执行过程中可能产生很多<code>undo日志</code>，这些日志可能一个页面放不下，需要放到多个页面中，这些页面就通过我们上边介绍的<code>TRX_UNDO_PAGE_NODE</code>属性连成了链表：</p>
 <p></p><figure><img alt="image_1d79v7bib12041n9d1gpe1t8a10jc1g.png-60.8kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a8074556f5d?w=1172&amp;h=381&amp;f=png&amp;s=62226"><figcaption></figcaption></figure><p></p>
 <p>大家往上再瞅一瞅上边的图，我们特意把链表中的第一个<code>Undo页面</code>给标了出来，称它为<code>first undo page</code>，其余的<code>Undo页面</code>称之为<code>normal undo page</code>，这是因为在<code>first undo page</code>中除了记录<code>Undo Page Header</code>之外，还会记录其他的一些管理信息，这个我们稍后再说哈。</p>
-<p>在一个事务执行过程中，可能混着执行<code>INSERT</code>、<code>DELETE</code>、<code>UPDATE</code>语句，也就意味着会产生不同类型的<code>undo日志</code>。但是我们前边又强调过，同一个<code>Undo页面</code>要么只存储<code>TRX_UNDO_INSERT</code>大类的<code>undo日志</code>，要么只存储<code>TRX_UNDO_UPDATE</code>大类的<code>undo日志</code>，反正不能混着存，所以在一个事务执行过程中就可能需要2个<code>Undo页面</code>的链表，一个称之为<code>insert undo链表</code>，另一个称之为<code>update undo链表</code>，画个示意图就是这样：</p>
+<p>在一个事务执行过程中，可能混着执行<code>INSERT</code>、<code>DELETE</code>、<code>UPDATE</code>语句，也就意味着会产生不同类型的<code>undo日志</code>。<u>但是我们前边又强调过，同一个<code>Undo页面</code>要么只存储<code>TRX_UNDO_INSERT</code>大类的<code>undo日志</code>，要么只存储<code>TRX_UNDO_UPDATE</code>大类的<code>undo日志</code>，反正不能混着存，所以在一个事务执行过程中就可能需要2个<code>Undo页面</code>的链表，一个称之为<code><b style="color:blue">insert undo链表</b></code>，另一个称之为<code><b style="color:blue">update undo链表</b></code>，画个示意图就是这样：</u></p>
 <p></p><figure><img alt="image_1d7a6t4va1e0c1l9t1hq51vlt183l2d.png-54.6kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a808197ad5b?w=1173&amp;h=404&amp;f=png&amp;s=55954"><figcaption></figcaption></figure><p></p>
-<p>另外，设计<code>InnoDB</code>的大叔规定对普通表和临时表的记录改动时产生的<code>undo日志</code>要分别记录（我们稍后阐释为啥这么做），所以在一个事务中<span style="color:red">最多</span>有4个以<code>Undo页面</code>为节点组成的链表：</p>
+<p><u>另外，设计<code>InnoDB</code>的大叔规定对普通表和临时表的记录改动时产生的<code>undo日志</code>要分别记录（我们稍后阐释为啥这么做），所以在一个事务中<span style="color:red">最多有4个</span>以<code>Undo页面</code>为节点组成的链表：</u></p>
 <p></p><figure><img alt="image_1d7bg5o7c3t11nch988lj51hsl9.png-106.8kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a80840261ec?w=1107&amp;h=633&amp;f=png&amp;s=109318"><figcaption></figcaption></figure><p></p>
 <p>当然，并不是在事务一开始就会为这个事务分配这4个链表，具体分配策略如下：</p>
 <ul>
@@ -100,7 +101,9 @@
 </li>
 </ul>
 <p>总结一句就是：<span style="color:red">按需分配，啥时候需要啥时候再分配，不需要就不分配</span>。</p>
-<h3 class="heading">多个事务中的Undo页面链表</h3>
+
+<br>
+<h3 style="color:blue" class="heading">多个事务中的Undo页面链表</h3>
 <p>为了尽可能提高<code>undo日志</code>的写入效率，<span style="color:red">不同事务执行过程中产生的undo日志需要被写入到不同的Undo页面链表中</span>。比方说现在有事务<code>id</code>分别为<code>1</code>、<code>2</code>的两个事务，我们分别称之为<code>trx 1</code>和<code>trx 2</code>，假设在这两个事务执行过程中：</p>
 <ul>
 <li>
@@ -134,9 +137,12 @@
 <p>综上所述，在<code>trx 1</code>和<code>trx 2</code>执行过程中，<code>InnoDB</code>共需为这两个事务分配5个<code>Undo页面</code>链表，画个图就是这样：</p>
 <p></p><figure><img alt="image_1d7blo9dp1m4tj1f1ke9te11654m.png-96.8kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a80bf9229a6?w=1145&amp;h=573&amp;f=png&amp;s=99142"><figcaption></figcaption></figure><p></p>
 <p>如果有更多的事务，那就意味着可能会产生更多的<code>Undo页面</code>链表。</p>
-<h2 class="heading">undo日志具体写入过程</h2>
-<h3 class="heading">段（Segment）的概念</h3>
-<p>如果你有认真看过表空间那一章的话，对这个<code>段</code>的概念应该印象深刻，我们当时花了非常大的篇幅来唠叨这个概念。简单讲，这个<code>段</code>是一个逻辑上的概念，本质上是由若干个零散页面和若干个完整的区组成的。比如一个<code>B+</code>树索引被划分成两个段，一个叶子节点段，一个非叶子节点段，这样叶子节点就可以被尽可能的存到一起，非叶子节点被尽可能的存到一起。每一个段对应一个<code>INODE Entry</code>结构，这个<code>INODE Entry</code>结构描述了这个段的各种信息，比如段的<code>ID</code>，段内的各种链表基节点，零散页面的页号有哪些等信息（具体该结构中每个属性的意思大家可以到表空间那一章里再次重温一下）。我们前边也说过，为了定位一个<code>INODE Entry</code>，设计<code>InnoDB</code>的大叔设计了一个<code>Segment Header</code>的结构：</p>
+
+<br>
+<h2 style="color:green" class="heading">4、undo日志具体写入过程</h2>
+<h3 style="color:blue" class="heading">复习一下段（Segment）的概念</h3>
+<p>如果你有认真看过表空间那一章的话，对这个<code>段</code>的概念应该印象深刻，我们当时花了非常大的篇幅来唠叨这个概念。简单讲，这个<code>段</code>是一个逻辑上的概念，本质上是由若干个零散页面和若干个完整的区组成的。比如一个<code>B+</code>树索引被划分成两个段，一个叶子节点段，一个非叶子节点段，这样叶子节点就可以被尽可能的存到一起，非叶子节点被尽可能的存到一起。每一个段对应一个<code>INODE Entry</code>结构，这个<code>INODE Entry</code>结构描述了这个段的各种信息，比如段的<code>ID</code>，段内的各种链表基节点，零散页面的页号有哪些等信息（具体该结构中每个属性的意思大家可以到表空间那一章里再次重温一下）。</p>
+<p>我们前边也说过，为了定位一个<code>INODE Entry</code>，设计<code>InnoDB</code>的大叔设计了一个<code>Segment Header</code>的结构：</p>
 <p></p><figure><img alt="image_1d7bp5ndt171bb6rkohot41e023.png-75.7kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a80c187c8c2?w=694&amp;h=361&amp;f=png&amp;s=77504"><figcaption></figcaption></figure><p></p>
 <p>整个<code>Segment Header</code>占用10个字节大小，各个属性的意思如下：</p>
 <ul>
@@ -154,10 +160,11 @@
 <blockquote class="warning"><p>小贴士：
 
 这部分关于段的各种概念我们在表空间那一章中都有详细解释，在这里重提一下只是为了唤醒大家沉睡的记忆，如果有任何不清楚的地方可以再次跳回表空间的那一章仔细读一下。
-</p></blockquote><h3 class="heading">Undo Log Segment Header</h3>
-<p>设计<code>InnoDB</code>的大叔规定，每一个<code>Undo页面</code>链表都对应着一个<code>段</code>，称之为<code>Undo Log Segment</code>。也就是说链表中的页面都是从这个段里边申请的，所以他们在<code>Undo页面</code>链表的第一个页面，也就是上边提到的<code>first undo page</code>中设计了一个称之为<code>Undo Log Segment Header</code>的部分，这个部分中包含了该链表对应的段的<code>segment header</code>信息以及其他的一些关于这个段的信息，所以<code>Undo</code>页面链表的第一个页面其实长这样：</p>
+</p></blockquote>
+<br><h3 style="color:blue" class="heading">4.1、Undo Log Segment Header</h3>
+<p>设计<code>InnoDB</code>的大叔规定，<b style="color:blue">每一个<code>Undo页面</code>链表都对应着一个<code>段</code>，称之为<code>Undo Log Segment</code>。</b>也就是说链表中的页面都是从这个段里边申请的，所以他们在<code>Undo页面</code>链表的第一个页面，也就是上边提到的<code>first undo page</code>中设计了一个称之为<code>Undo Log Segment Header</code>的部分，这个部分中包含了该链表对应的段的<code>segment header</code>信息以及其他的一些关于这个段的信息，所以<b style="color:blue"><code>Undo</code>页面链表的第一个页面</b>其实长这样：</p>
 <p></p><figure><img alt="image_1d7brcccqah1rdn10573vh1onip.png-70.5kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a80e0dadcce?w=915&amp;h=555&amp;f=png&amp;s=72243"><figcaption></figcaption></figure><p></p>
-<p>可以看到这个<code>Undo</code>链表的第一个页面比普通页面多了个<code>Undo Log Segment Header</code>，我们来看一下它的结构：</p>
+<p>可以看到这个<code>Undo</code>链表的第一个页面比普通页面多了个<code><b style="color:blue">Undo Log Segment Header</b></code>，我们来看一下它的结构：</p>
 <p></p><figure><img alt="image_1d7bsbk8o15ja2bk1s9p11c51vs2p.png-80.2kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a80e753a16e?w=642&amp;h=555&amp;f=png&amp;s=82117"><figcaption></figcaption></figure><p></p>
 <p>其中各个属性的意思如下：</p>
 <ul>
@@ -199,7 +206,9 @@ Undo页面链表什么时候会被重用，怎么重用我们之后会详细说�
 <p>我们上边说<code>Undo页面</code>的<code>Undo Page Header</code>部分有一个12字节大小的<code>TRX_UNDO_PAGE_NODE</code>属性，这个属性代表一个<code>List Node</code>结构。每一个<code>Undo页面</code>都包含<code>Undo Page Header</code>结构，这些页面就可以通过这个属性连成一个链表。这个<code>TRX_UNDO_PAGE_LIST</code>属性代表着这个链表的基节点，当然这个基节点只存在于<code>Undo页面</code>链表的第一个页面，也就是<code>first undo page</code>中。</p>
 </li>
 </ul>
-<h3 class="heading">Undo Log Header</h3>
+
+<br>
+<h3 style="color:blue" class="heading">4.2、Undo Log Header</h3>
 <p>一个事务在向<code>Undo页面</code>中写入<code>undo日志</code>时的方式是十分简单暴力的，就是直接往里怼，写完一条紧接着写另一条，各条<code>undo日志</code>之间是亲密无间的。写完一个<code>Undo页面</code>后，再从段里申请一个新页面，然后把这个页面插入到<code>Undo页面</code>链表中，继续往这个新申请的页面中写。设计<code>InnoDB</code>的大叔认为同一个事务向一个<code>Undo页面</code>链表中写入的<code>undo日志</code>算是一个组，比方说我们上边介绍的<code>trx 1</code>由于会分配3个<code>Undo页面</code>链表，也就会写入3个组的<code>undo日志</code>；<code>trx 2</code>由于会分配2个<code>Undo页面</code>链表，也就会写入2个组的<code>undo日志</code>。在每写入一组<code>undo日志</code>时，都会在这组<code>undo日志</code>前先记录一下关于这个组的一些属性，设计<code>InnoDB</code>的大叔把存储这些属性的地方称之为<code>Undo Log Header</code>。所以<code>Undo页面</code>链表的第一个页面在真正写入<code>undo日志</code>前，其实都会被填充<code>Undo Page Header</code>、<code>Undo Log Segment Header</code>、<code>Undo Log Header</code>这3个部分，如图所示：</p>
 <p></p><figure><img alt="image_1d7cbktqb16oqih12mqmghn2a1m.png-82kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a80ee6fb23f?w=964&amp;h=605&amp;f=png&amp;s=83957"><figcaption></figcaption></figure><p></p>
 <p>这个<code>Undo Log Header</code>具体的结构如下：</p>
@@ -246,11 +255,18 @@ Undo页面链表什么时候会被重用，怎么重用我们之后会详细说�
 关于History链表我们后边会格外详细的唠叨，现在先不用管哈。
 </p></blockquote></li>
 </ul>
-<h3 class="heading">小结</h3>
-<p>对于没有被重用的<code>Undo页面</code>链表来说，链表的第一个页面，也就是<code>first undo page</code>在真正写入<code>undo日志</code>前，会填充<code>Undo Page Header</code>、<code>Undo Log Segment Header</code>、<code>Undo Log Header</code>这3个部分，之后才开始正式写入<code>undo日志</code>。对于其他的页面来说，也就是<code>normal undo page</code>在真正写入<code>undo日志</code>前，只会填充<code>Undo Page Header</code>。链表的<code>List Base Node</code>存放到<code>first undo page</code>的<code>Undo Log Segment Header</code>部分，<code>List Node</code>信息存放到每一个<code>Undo页面</code>的<code>undo Page Header</code>部分，所以画一个<code>Undo页面</code>链表的示意图就是这样：</p>
+
+<br>
+<h3 style="color:blue" class="heading">4.3、小结</h3>
+<p>对于没有被重用的<code>Undo页面</code>链表来说，<br>
+&emsp;链表的第一个页面，也就是<code>first undo page</code>在真正写入<code>undo日志</code>前，会填充<code>Undo Page Header</code>、<code>Undo Log Segment Header</code>、<code>Undo Log Header</code>这3个部分，之后才开始正式写入<code>undo日志</code>。<br>
+&emsp;对于其他的页面来说，也就是<code>normal undo page</code>在真正写入<code>undo日志</code>前，只会填充<code>Undo Page Header</code>。<br>链表的<code>List Base Node</code>存放到<code>first undo page</code>的<code>Undo Log Segment Header</code>部分，<code>List Node</code>信息存放到每一个<code>Undo页面</code>的<code>undo Page Header</code>部分，所以画一个<code>Undo页面</code>链表的示意图就是这样：</p>
 <p></p><figure><img alt="image_1d7cocjrk1dvm1ehg16da1di4mfb16.png-87kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a80f3cc070f?w=1134&amp;h=502&amp;f=png&amp;s=89063"><figcaption></figcaption></figure><p></p>
-<h2 class="heading">重用Undo页面</h2>
-<p>我们前边说为了能提高并发执行的多个事务写入<code>undo日志</code>的性能，设计<code>InnoDB</code>的大叔决定为每个事务单独分配相应的<code>Undo页面</code>链表（最多可能单独分配4个链表）。但是这样也造成了一些问题，比如其实大部分事务执行过程中可能只修改了一条或几条记录，针对某个<code>Undo页面</code>链表只产生了非常少的<code>undo日志</code>，这些<code>undo日志</code>可能只占用一丢丢存储空间，每开启一个事务就新创建一个<code>Undo页面</code>链表（虽然这个链表中只有一个页面）来存储这么一丢丢<code>undo日志</code>岂不是太浪费了么？的确是挺浪费，于是设计<code>InnoDB</code>的大叔本着勤俭节约的优良传统，决定在事务提交后在某些情况下重用该事务的<code>Undo页面</code>链表。一个<code>Undo页面</code>链表是否可以被重用的条件很简单：</p>
+
+<br>
+<h2 style="color:green" class="heading">5、重用Undo页面</h2>
+<p>我们前边说为了能提高并发执行的多个事务写入<code>undo日志</code>的性能，设计<code>InnoDB</code>的大叔决定为每个事务单独分配相应的<code>Undo页面</code>链表（最多可能单独分配4个链表）。但是这样也造成了一些问题，比如其实大部分事务执行过程中可能只修改了一条或几条记录，针对某个<code>Undo页面</code>链表只产生了非常少的<code>undo日志</code>，这些<code>undo日志</code>可能只占用一丢丢存储空间，每开启一个事务就新创建一个<code>Undo页面</code>链表（虽然这个链表中只有一个页面）来存储这么一丢丢<code>undo日志</code>岂不是太浪费了么？的确是挺浪费，于是设计<code>InnoDB</code>的大叔本着勤俭节约的优良传统，决定在事务提交后在某些情况下重用该事务的<code>Undo页面</code>链表。</p>
+<p>一个<code>Undo页面</code>链表是否可以被重用的条件很简单：</p>
 <ul>
 <li>
 <p>该链表中只包含一个<code>Undo页面</code>。</p>
@@ -260,7 +276,7 @@ Undo页面链表什么时候会被重用，怎么重用我们之后会详细说�
 <p>该<code>Undo页面</code>已经使用的空间小于整个页面空间的3/4。</p>
 </li>
 </ul>
-<p>我们前边说过，<code>Undo页面</code>链表按照存储的<code>undo日志</code>所属的大类可以被分为<code>insert undo链表</code>和<code>update undo链表</code>两种，这两种链表在被重用时的策略也是不同的，我们分别看一下：</p>
+<p>我们前边说过，<code>Undo页面</code>链表按照存储的<code>undo日志</code>所属的大类可以被分为<code>insert undo链表</code>和<code>update undo链表</code>两种，<u>这两种链表在被重用时的策略也是不同的，我们分别看一下：</u></p>
 <ul>
 <li>
 <p>insert undo链表</p>
@@ -277,8 +293,10 @@ Undo页面链表什么时候会被重用，怎么重用我们之后会详细说�
 <p></p><figure><img alt="image_1d7elkmtjdbv1kth1c9jk17is123.png-126.3kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a81007cdf9f?w=1003&amp;h=560&amp;f=png&amp;s=129368"><figcaption></figcaption></figure><p></p>
 </li>
 </ul>
-<h2 class="heading">回滚段</h2>
-<h3 class="heading">回滚段的概念</h3>
+
+<br>
+<h2 style="color:green" class="heading">6、回滚段</h2>
+<h3 style="color:blue" class="heading">回滚段的概念</h3>
 <p>我们现在知道一个事务在执行过程中最多可以分配4个<code>Undo页面</code>链表，在同一时刻不同事务拥有的<code>Undo页面</code>链表是不一样的，所以在同一时刻系统里其实可以有许许多多个<code>Undo页面</code>链表存在。为了更好的管理这些链表，设计<code>InnoDB</code>的大叔又设计了一个称之为<code>Rollback Segment Header</code>的页面，在这个页面中存放了各个<code>Undo页面</code>链表的<code>frist undo page</code>的<code>页号</code>，他们把这些<code>页号</code>称之为<code>undo slot</code>。我们可以这样理解，每个<code>Undo页面</code>链表都相当于是一个班，这个链表的<code>first undo page</code>就相当于这个班的班长，找到了这个班的班长，就可以找到班里的其他同学（其他同学相当于<code>normal undo page</code>）。有时候学校需要向这些班级传达一下精神，就需要把班长都召集在会议室，这个<code>Rollback Segment Header</code>就相当于是一个会议室。</p>
 <p>我们看一下这个称之为<code>Rollback Segment Header</code>的页面长啥样（以默认的16KB为例）：</p>
 <p></p><figure><img alt="image_1d7gs2k8u1i9i15r71dg97fj10jv9.png-88kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a810434772a?w=676&amp;h=541&amp;f=png&amp;s=90109"><figcaption></figcaption></figure><p></p>
@@ -309,7 +327,7 @@ History链表后边讲，稍安勿躁。
 <p>一个页号占用<code>4</code>个字节，对于<code>16KB</code>大小的页面来说，这个<code>TRX_RSEG_UNDO_SLOTS</code>部分共存储了<code>1024</code>个<code>undo slot</code>，所以共需<code>1024 × 4 = 4096</code>个字节。</p>
 </li>
 </ul>
-<h3 class="heading">从回滚段中申请Undo页面链表</h3>
+<h3 style="color:blue" class="heading">从回滚段中申请Undo页面链表</h3>
 <p>初始情况下，由于未向任何事务分配任何<code>Undo页面</code>链表，所以对于一个<code>Rollback Segment Header</code>页面来说，它的各个<code>undo slot</code>都被设置成了一个特殊的值：<code>FIL_NULL</code>（对应的十六进制就是<code>0xFFFFFFFF</code>），表示该<code>undo slot</code>不指向任何页面。</p>
 <p>随着时间的流逝，开始有事务需要分配<code>Undo页面</code>链表了，就从回滚段的第一个<code>undo slot</code>开始，看看该<code>undo slot</code>的值是不是<code>FIL_NULL</code>：</p>
 <ul>
@@ -354,7 +372,7 @@ History链表后边讲，稍安勿躁。
 更多关于History链表的事我们稍后再说，稍安勿躁哈。
 </p></blockquote></li>
 </ul>
-<h3 class="heading">多个回滚段</h3>
+<h3 style="color:blue" class="heading">多个回滚段</h3>
 <p>我们说一个事务执行过程中最多分配<code>4</code>个<code>Undo页面</code>链表，而一个回滚段里只有<code>1024</code>个<code>undo slot</code>，很显然<code>undo slot</code>的数量有点少啊。我们即使假设一个读写事务执行过程中只分配<code>1</code>个<code>Undo页面</code>链表，那<code>1024</code>个<code>undo slot</code>也只能支持<code>1024</code>个读写事务同时执行，再多了就崩溃了。这就相当于会议室只能容下1024个班长同时开会，如果有几千人同时到会议室开会的话，那后来的那些班长就没地方坐了，只能等待前边的人开完会自己再进去开。</p>
 <p>话说在<code>InnoDB</code>的早期发展阶段的确只有一个回滚段，但是设计<code>InnoDB</code>的大叔后来意识到了这个问题，咋解决这问题呢？会议室不够，多盖几个会议室不就得了。所以设计<code>InnoDB</code>的大叔一口气定义了<code>128</code>个回滚段，也就相当于有了<code>128 × 1024 = 131072</code>个<code>undo slot</code>。假设一个读写事务执行过程中只分配<code>1</code>个<code>Undo页面</code>链表，那么就可以同时支持<code>131072</code>个读写事务并发执行（这么多事务在一台机器上并发执行，还真没见过呢～）。</p>
 <blockquote class="warning"><p>小贴士：
@@ -377,7 +395,7 @@ History链表后边讲，稍安勿躁。
 <p>所以通过上边的叙述我们可以大致清楚，在系统表空间的第<code>5</code>号页面中存储了128个<code>Rollback Segment Header</code>页面地址，每个<code>Rollback Segment Header</code>就相当于一个回滚段。在<code>Rollback Segment Header</code>页面中，又包含<code>1024</code>个<code>undo slot</code>，每个<code>undo slot</code>都对应一个<code>Undo页面</code>链表。我们画个示意图：</p>
 <p></p><figure><img alt="image_1d7h72gvlin31far16h11elj16tu1m.png-97kB" src="https://user-gold-cdn.xitu.io/2019/4/16/16a24a8116df4474?w=1070&amp;h=618&amp;f=png&amp;s=99368"><figcaption></figcaption></figure><p></p>
 <p>把图一画出来就清爽多了。</p>
-<h3 class="heading">回滚段的分类</h3>
+<h3 style="color:blue" class="heading">回滚段的分类</h3>
 <p>我们把这128个回滚段给编一下号，最开始的回滚段称之为<code>第0号回滚段</code>，之后依次递增，最后一个回滚段就称之为<code>第127号回滚段</code>。这128个回滚段可以被分成两大类：</p>
 <ul>
 <li>
@@ -394,7 +412,7 @@ History链表后边讲，稍安勿躁。
 <blockquote class="warning"><p>小贴士：
 
 实际上在MySQL 5.7.21这个版本中，如果我们仅仅对普通表的记录做了改动，那么只会为该事务分配针对普通表的回滚段，不分配针对临时表的回滚段。但是如果我们仅仅对临时表的记录做了改动，那么既会为该事务分配针对普通表的回滚段，又会为其分配针对临时表的回滚段（不过分配了回滚段并不会立即分配undo slot，只有在真正需要Undo页面链表时才会去分配回滚段中的undo slot）。
-</p></blockquote><h3 class="heading">为事务分配Undo页面链表详细过程</h3>
+</p></blockquote><h3 style="color:blue" class="heading">为事务分配Undo页面链表详细过程</h3>
 <p>上边说了一大堆的概念，大家应该有一点点的小晕，接下来我们以事务对普通表的记录做改动为例，给大家梳理一下事务执行过程中分配<code>Undo页面</code>链表时的完整过程，</p>
 <ul>
 <li>
@@ -416,8 +434,10 @@ History链表后边讲，稍安勿躁。
 </li>
 </ul>
 <p>对临时表的记录做改动的步骤和上述的一样，就不赘述了。不错需要再次强调一次，<span style="color:red">如果一个事务在执行过程中既对普通表的记录做了改动，又对临时表的记录做了改动，那么需要为这个记录分配2个回滚段。并发执行的不同事务其实也可以被分配相同的回滚段，只要分配不同的undo slot就可以了</span>。</p>
-<h2 class="heading">回滚段相关配置</h2>
-<h3 class="heading">配置回滚段数量</h3>
+
+<br>
+<h2 style="color:green" class="heading">7、回滚段相关配置</h2>
+<h3 style="color:blue" class="heading">配置回滚段数量</h3>
 <p>我们前边说系统中一共有<code>128</code>个回滚段，其实这只是默认值，我们可以通过启动参数<code>innodb_rollback_segments</code>来配置回滚段的数量，可配置的范围是<code>1~128</code>。但是这个参数并不会影响针对临时表的回滚段数量，针对临时表的回滚段数量一直是<code>32</code>，也就是说：</p>
 <ul>
 <li>
@@ -432,7 +452,7 @@ History链表后边讲，稍安勿躁。
 <p>如果我们把<code>innodb_rollback_segments</code>设置为大于<code>33</code>的数，那么针对普通表的可用回滚段数量就是该值减去32。</p>
 </li>
 </ul>
-<h3 class="heading">配置undo表空间</h3>
+<h3 style="color:blue" class="heading">配置undo表空间</h3>
 <p>默认情况下，针对普通表设立的回滚段（第<code>0</code>号以及第<code>33~127</code>号回滚段）都是被分配到系统表空间的。其中的第第<code>0</code>号回滚段是一直在系统表空间的，但是第<code>33~127</code>号回滚段可以通过配置放到自定义的<code>undo表空间</code>中。但是这种配置只能在系统初始化（创建数据目录时）的时候使用，一旦初始化完成，之后就不能再次更改了。我们看一下相关启动参数：</p>
 <ul>
 <li>
